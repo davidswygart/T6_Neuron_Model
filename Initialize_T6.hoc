@@ -1,0 +1,168 @@
+objref SegRec, SegDist, CurrentGraph, CurrentGraphSyn, VoltageGraph, VolgateGraphSyn, VolCla, RVout, RfOut, SVout, SfOut, ncList, tmpvec, RFile, tmpvec, RibRec_NoInh, RibRec_WInh,IFile, IX, IY, IZ, ncList_Rib, stim,stim2, Istim, Istim_Dyad, XYZ_rib, XYZ_both, XYZ_inh, ncList, Istim[2], Istim_Dyad[2], InhSyn_Array[2] // Declare objects that we will use later
+// Load Files that contain functions and processes
+load_file("SupportCode/PointProc.hoc") 				// Load script that places synapses and voltage recorders
+load_file("SupportCode/Graph.hoc") 					// Load script that makes graphs
+load_file("SupportCode/Electrode.hoc")				// Load script that places Iclamp and Vclamp electrodes
+load_file("SupportCode/RunWrite.hoc")				// Load script that runs the simulation
+load_file("SupportCode/DistanceMeasurements.hoc")	// Load functions that measure distances between points
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////// Specify experimental parameters ///////////////////////////////////////////////////////
+//Timing
+ExcStart = 0				// When to start stimulation of Stem (ms)
+ExcDur = 100				// How long to stimulate stem (ms)
+SpikeStart = 25				// When the inhibitory synapses begin to be stimulated (ms)
+SpikeDur = 	75				// How long to stimulate the inhibitory synapes (ms)
+SpikeStart_Dyad = SpikeStart		// When the inhibitory synapses begin to be stimulated (ms)
+SpikeDur_Dyad = SpikeDur			// How long to stimulate the inhibitory synapes (ms)
+tstop = 100					// How long to Run the simulation (ms)
+
+//Voltage Clamp Mode (optional)
+DoVClamp = 0				// Set to 1 to run in voltage clamp configuration
+
+Hold1_VolCla = 0			// Initial holding potential (mV)
+Dur1_VolCla = 100			// Duration to hold at this potential (ms)
+
+Hold2_VolCla = 	0			// Step holding potential (mV)
+Dur2_VolCla = 	0			// Duration to hold at second potential
+
+//Graphs
+Vmin = -70					// Minimum voltage shown on graph (mV)
+Vmax = 20					// Maximum voltage shown on graph (mV)
+
+Imin = 	5					// Minimum current shown on graph (pA) // Only aplicable if in voltage clamp mode
+Imax = 	25					// Maximum current shown on graph (pA) // Only aplicable if in voltage clamp mode
+
+// Individual Synapse Voltage (optional)
+DoIndSyn = 1				// Set to 1 to examine an individual synapse
+SynNum = 0					//Index number of the synapse to examine
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////// Specify physiology parameters ///////////////////////////////////////////////////////
+//Passive Properties
+celcius = 32
+v_init = -37 //(after excitation)-46.7				// What voltage to start the cell at (mV)
+CM = 1.18					// Membrance capacitance (uF/Cm2)
+RA = 132					// Axial resistance (Ohm cm2)
+EPAS = -60					// Equilibrium potential of passive conductances (mV)
+G_PAS = 0.00003906			// Passive membrane conductance (mho cm2)
+BaselineExc = 3.5				// How much current to inject (pA), push to restin membrane potential of -46.7 mV (3.5 &)
+
+//Excitatory input
+ExcAmp = 2.5				// How much current to inject (pA)
+
+// Inhibition to non-dyad sites
+inhDecay = 2//19.2 			//decays time on inhibitory synapse (ms)
+SpikeFreq = 10					//Frequency of inhibitory spiking (hZ)
+StimNoise = 0					//0 deterministic, 1 intervals have negexp distribution.
+SynWeight_Initial = 0.0001	// Initial weight set for each inhibitory synapse
+SynWeight_Change = 0.0001			// Weight each synapse is changed to 1 by 1 (Only applicable for LoopedRun)
+RevPot = -60					// Reversal Potential of each inhibitory synapse (mV)
+
+
+// Inhibition directly onto dyads (can just be the same as above)
+SpikeFreq_Dyad = SpikeFreq
+SynWeight_Initial_Dyad = SynWeight_Initial 	// Initial weight set for each inhibitory synapse (.00001 give 30 pA inhibition at 0mV)(Erika Eggars 2007)
+SynWeight_Change_Dyad = SynWeight_Change  	// Weight each synapse is changed to 1 by 1 (Only applicable for LoopedRun)
+RevPot_Dyad = RevPot						// Reversal Potential of each inhibitory synapse (mV)
+
+//L-type voltage gated calcium channels
+GCAL = 0//0.0025 //Gives 30 pA calcium current when stepped from -70 to -35
+KI = .001 //
+ET = 113 			//cv inactivation?
+CT = 1 				//dc calcium concentration?
+MT = 1 				//c activation?
+VHFA = -36 		// Activation half-max?
+SLPA = 5//8   		// slope activation (mv)?
+VHFI = -31		// inactivation half-max?
+SLPI = 13 		// slope inactivation (mv)?
+
+
+
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////// Build Model Cell //////////////////////////////////////////////////////////////
+load_file("SupportCode/T6_V3.hoc") 		// Load axon morphology and biophysics
+
+ncList = new List()						// List of inhibitory spiking amacrine to inhibitory synapse connections
+
+XYZ_rib = ReadLocation("InputData/RibbonLocations.txt")
+XYZ_both = ReadLocation("InputData/BothLocations.txt")
+XYZ_inh = ReadLocation("InputData/InhSynLocations.txt")
+
+objref InhSyn_Array[XYZ_both.o[0].size() + XYZ_inh.o[0].size()] // Create an inhibitory synapse array that is as large as the sum of dyad inhibitory synapses and non-dyad inhibitory synapses combined
+RibRec_NoInh = AddRibbonsNoInh(XYZ_rib)
+RibRec_WInh = AddRibbonsWithInh(XYZ_both)
+AddnonDyadInh (XYZ_inh)
+SegRec = RecordSegments()									//Set recording points at each segment
+
+print "There are ", ncList.count(), "Inhibitory synapses total in the list (ncList)"
+
+
+numSegs = 0
+forall{
+	numSegs = numSegs + nseg
+}
+print "There are ", numSegs, " segments in the model"
+print secname()
+
+//Place Current clamp and/or voltage clamp electrodes
+stim = 			CurrentClamp()			// Current pulse at stem
+stim2 = 		CurrentClamp2()		// Current pulse at stem
+VoltageGraph = 	VGraph("dend_0[0].v(0)") 				// Graph Voltage at stem
+
+
+
+if (DoIndSyn == 1){
+	VolgateGraphSyn = VGraph("Ribbon_WInh_Bouton[0].v")
+}
+
+
+if (DoVClamp == 1){
+	v_init = Hold1_VolCla
+
+	if (DoIndSyn == 1){
+		{ x = InhSyn_Array[SynNum].get_loc()
+		VolCla = 	VoltageClamp()			// Place Voltage clamp at stem
+		pop_section()}
+
+	} else {
+		VolCla = 	VoltageClamp()			// Place Voltage clamp at stem
+	}
+
+	CurrentGraph = CGraph("SEClamp[0].i") 			// Graph Current through VClamp
+
+}
+
+
+
+forall{
+	Ra = RA
+	Cm = CM
+	g_pas = G_PAS
+	e_pas = EPAS}
+
+forall{
+insert KV2
+pt_KV2 = 0.7277
+qt_KV2 = 6.6
+vha_KV2 = -10
+sla_KV2 = 14
+vhi_KV2 = -40
+sli_KV2 = 9.7
+gkbar_KV2	= 0//0.046  //gives 1712 pA K current of when stepped from -60mV to 30mV (Hu and Pan 2002)
+ek_KV2	= -90//-56
+}
+
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////// Run the simulation //////////////////////////////////////////////////////////////
+MeasureSegDist("OutputData/Seg2InhSyn_Distances.txt")		//Measure the distance from each segment to each inh
+//RtoStalk_Distance("InputData/AllRibbonLocations.txt")	//Measure the distance from each ribbon to the stalk (Can be commented out)
+//Branch("InputData/AllRibbonLocations.txt") //Measure the branch order of each ribbon
+
+
+SingleRun(RibRec_NoInh,SegRec,RibRec_WInh)
+//SingleSynapseRun(RibRec_NoInh,SegRec,RibRec_WInh)
+//LoopedRun(ncList,RibRec_NoInh,SegRec, RibRec_WInh)
+//WriteTrace(RibRec_NoInh,SegRec,RibRec_WInh)
